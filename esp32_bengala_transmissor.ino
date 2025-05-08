@@ -1,0 +1,128 @@
+// Código para o ESP32 da Bengala (Transmissor ESP-NOW) - MODIFICADO
+#include <esp_now.h>
+#include <WiFi.h>
+#include <Ultrasonic.h> // Mantida para os outros sensores ultrassônicos
+
+// --- Definições de Pinos (GPIO Indiretos) ---
+// SUBSTITUA PELO ENDEREÇO MAC DO ESP32 RECEPTOR (BANDANA)
+uint8_t broadcastAddress[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}; // Usar o MAC específico do receptor
+
+// Sensores Ultrassônicos
+#define US_FRENTE_TRIGGER_PIN 13
+#define US_FRENTE_ECHO_PIN 12
+#define US_ESQUERDA_TRIGGER_PIN 14
+#define US_ESQUERDA_ECHO_PIN 27
+#define US_DIREITA_TRIGGER_PIN 26
+#define US_DIREITA_ECHO_PIN 25
+
+// Sensor Infravermelho (substituindo o ultrassônico traseiro/inferior)
+#define IR_INFERIOR_ANALOG_PIN 32 // Pino GPIO para a saída A0 do sensor IR
+
+// --- Instâncias dos Sensores ---
+Ultrasonic ultrasonic_frente(US_FRENTE_TRIGGER_PIN, US_FRENTE_ECHO_PIN);
+Ultrasonic ultrasonic_esquerda(US_ESQUERDA_TRIGGER_PIN, US_ESQUERDA_ECHO_PIN);
+Ultrasonic ultrasonic_direita(US_DIREITA_TRIGGER_PIN, US_DIREITA_ECHO_PIN);
+// Não há mais instância para o ultrassônico traseiro
+
+// --- Estrutura de Dados para ESP-NOW ---
+// Deve ser a mesma no transmissor e no receptor
+typedef struct struct_message {
+    float distancia_frente;       // Distância do sensor frontal
+    float distancia_esquerda;     // Distância do sensor lateral esquerdo
+    float distancia_direita;      // Distância do sensor lateral direito
+    // float distancia_tras;      // Removido - substituído por IR
+
+    bool obstaculo_frente;
+    bool obstaculo_esquerda;
+    bool obstaculo_direita;
+    // bool obstaculo_tras;      // Removido - substituído por IR
+    bool obstaculo_inferior_ir; // Novo campo para o sensor IR inferior
+} struct_message;
+
+struct_message dadosSensores;
+
+// --- Configurações ESP-NOW ---
+esp_now_peer_info_t peerInfo;
+
+// --- Limiares de Detecção ---
+#define LIMIAR_OBSTACULO_ULTRASONICO 50.0 // Em cm, para sensores ultrassônicos. Ajuste conforme necessidade.
+#define LIMIAR_SENSOR_IR_ANALOGICO 3000   // Valor analógico (0-4095). AJUSTE ESTE VALOR experimentalmente!
+                                          // Sensores IR podem ter comportamento invertido (menor valor = mais perto)
+                                          // ou direto (maior valor = mais perto). Verifique o seu sensor.
+                                          // Este é um valor de EXEMPLO.
+
+// Callback executado quando os dados são enviados
+void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
+  Serial.print("\r\nStatus do último pacote enviado:\t");
+  Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Entregue com Sucesso" : "Falha na Entrega");
+}
+ 
+void setup() {
+  Serial.begin(115200);
+  
+  // Configura o dispositivo como uma estação Wi-Fi
+  WiFi.mode(WIFI_STA);
+
+  // Inicializa o ESP-NOW
+  if (esp_now_init() != ESP_OK) {
+    Serial.println("Erro ao inicializar ESP-NOW");
+    return;
+  }
+
+  // Registra o callback de envio
+  esp_now_register_send_cb(OnDataSent);
+  
+  // Registra o peer (receptor)
+  memcpy(peerInfo.peer_addr, broadcastAddress, 6);
+  peerInfo.channel = 0;  
+  peerInfo.encrypt = false;
+  
+  // Adiciona o peer        
+  if (esp_now_add_peer(&peerInfo) != ESP_OK){
+    Serial.println("Falha ao adicionar peer");
+    return;
+  }
+
+  // Configura o pino do sensor IR como entrada
+  pinMode(IR_INFERIOR_ANALOG_PIN, INPUT);
+
+  Serial.println("ESP32 Bengala (Transmissor com IR) configurado.");
+}
+ 
+void loop() {
+  // --- Leitura dos Sensores Ultrassônicos ---
+  dadosSensores.distancia_frente = ultrasonic_frente.read();
+  dadosSensores.distancia_esquerda = ultrasonic_esquerda.read();
+  dadosSensores.distancia_direita = ultrasonic_direita.read();
+
+  dadosSensores.obstaculo_frente = dadosSensores.distancia_frente < LIMIAR_OBSTACULO_ULTRASONICO && dadosSensores.distancia_frente > 0;
+  dadosSensores.obstaculo_esquerda = dadosSensores.distancia_esquerda < LIMIAR_OBSTACULO_ULTRASONICO && dadosSensores.distancia_esquerda > 0;
+  dadosSensores.obstaculo_direita = dadosSensores.distancia_direita < LIMIAR_OBSTACULO_ULTRASONICO && dadosSensores.distancia_direita > 0;
+
+  // --- Leitura do Sensor Infravermelho (Analógico) ---
+  int valor_analogico_ir = analogRead(IR_INFERIOR_ANALOG_PIN);
+  // A lógica de detecção para o IR pode precisar de ajuste.
+  // Exemplo: se um valor MENOR que o limiar significa obstáculo (sensor IR típico de refletância)
+  dadosSensores.obstaculo_inferior_ir = valor_analogico_ir < LIMIAR_SENSOR_IR_ANALOGICO;
+  // Se o seu sensor IR funcionar ao contrário (valor MAIOR = obstáculo), mude para: 
+  // dadosSensores.obstaculo_inferior_ir = valor_analogico_ir > LIMIAR_SENSOR_IR_ANALOGICO;
+
+  // --- Envio dos Dados via ESP-NOW ---
+  esp_err_t result = esp_now_send(broadcastAddress, (uint8_t *) &dadosSensores, sizeof(dadosSensores));
+   
+  if (result == ESP_OK) {
+    //Serial.println("Dados enviados com sucesso");
+  } else {
+    Serial.println("Erro ao enviar os dados");
+  }
+
+  // --- Impressão no Serial Monitor para Debug ---
+  Serial.print("Frente: "); Serial.print(dadosSensores.distancia_frente); Serial.print(" cm, Obstáculo: "); Serial.println(dadosSensores.obstaculo_frente);
+  Serial.print("Esquerda: "); Serial.print(dadosSensores.distancia_esquerda); Serial.print(" cm, Obstáculo: "); Serial.println(dadosSensores.obstaculo_esquerda);
+  Serial.print("Direita: "); Serial.print(dadosSensores.distancia_direita); Serial.print(" cm, Obstáculo: "); Serial.println(dadosSensores.obstaculo_direita);
+  Serial.print("IR Inferior (Valor Analógico): "); Serial.print(valor_analogico_ir);
+  Serial.print(", Obstáculo Detectado: "); Serial.println(dadosSensores.obstaculo_inferior_ir);
+  Serial.println("-------------------------------------");
+
+  delay(200); // Intervalo entre as leituras e envios. Ajustar conforme necessidade.
+}
