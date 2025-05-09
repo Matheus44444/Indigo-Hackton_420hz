@@ -1,10 +1,8 @@
-// Código para o ESP32 da Bengala (Transmissor ESP-NOW) - MODIFICADO
 #include <esp_now.h>
 #include <WiFi.h>
-#include <Ultrasonic.h> // Mantida para os outros sensores ultrassônicos
+#include <Ultrasonic.h>
 
 // --- Definições de Pinos (GPIO Indiretos) ---
-// SUBSTITUA PELO ENDEREÇO MAC DO ESP32 RECEPTOR (BANDANA)
 uint8_t broadcastAddress[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}; // Usar o MAC específico do receptor
 
 // Sensores Ultrassônicos
@@ -25,18 +23,14 @@ Ultrasonic ultrasonic_direita(US_DIREITA_TRIGGER_PIN, US_DIREITA_ECHO_PIN);
 // Não há mais instância para o ultrassônico traseiro
 
 // --- Estrutura de Dados para ESP-NOW ---
-// Deve ser a mesma no transmissor e no receptor
 typedef struct struct_message {
-    float distancia_frente;       // Distância do sensor frontal
-    float distancia_esquerda;     // Distância do sensor lateral esquerdo
-    float distancia_direita;      // Distância do sensor lateral direito
-    // float distancia_tras;      // Removido - substituído por IR
-
+    float distancia_frente;       
+    float distancia_esquerda;     
+    float distancia_direita;
     bool obstaculo_frente;
     bool obstaculo_esquerda;
     bool obstaculo_direita;
-    // bool obstaculo_tras;      // Removido - substituído por IR
-    bool obstaculo_inferior_ir; // Novo campo para o sensor IR inferior
+    bool obstaculo_inferior_ir; 
 } struct_message;
 
 struct_message dadosSensores;
@@ -45,11 +39,8 @@ struct_message dadosSensores;
 esp_now_peer_info_t peerInfo;
 
 // --- Limiares de Detecção ---
-#define LIMIAR_OBSTACULO_ULTRASONICO 50.0 // Em cm, para sensores ultrassônicos. Ajuste conforme necessidade.
-#define LIMIAR_SENSOR_IR_ANALOGICO 3000   // Valor analógico (0-4095). AJUSTE ESTE VALOR experimentalmente!
-                                          // Sensores IR podem ter comportamento invertido (menor valor = mais perto)
-                                          // ou direto (maior valor = mais perto). Verifique o seu sensor.
-                                          // Este é um valor de EXEMPLO.
+#define LIMIAR_OBSTACULO_ULTRASONICO 50.0 
+#define LIMIAR_SENSOR_IR_ANALOGICO 3000  
 
 // Callback executado quando os dados são enviados
 void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
@@ -101,11 +92,7 @@ void loop() {
 
   // --- Leitura do Sensor Infravermelho (Analógico) ---
   int valor_analogico_ir = analogRead(IR_INFERIOR_ANALOG_PIN);
-  // A lógica de detecção para o IR pode precisar de ajuste.
-  // Exemplo: se um valor MENOR que o limiar significa obstáculo (sensor IR típico de refletância)
   dadosSensores.obstaculo_inferior_ir = valor_analogico_ir < LIMIAR_SENSOR_IR_ANALOGICO;
-  // Se o seu sensor IR funcionar ao contrário (valor MAIOR = obstáculo), mude para: 
-  // dadosSensores.obstaculo_inferior_ir = valor_analogico_ir > LIMIAR_SENSOR_IR_ANALOGICO;
 
   // --- Envio dos Dados via ESP-NOW ---
   esp_err_t result = esp_now_send(broadcastAddress, (uint8_t *) &dadosSensores, sizeof(dadosSensores));
@@ -124,5 +111,5 @@ void loop() {
   Serial.print(", Obstáculo Detectado: "); Serial.println(dadosSensores.obstaculo_inferior_ir);
   Serial.println("-------------------------------------");
 
-  delay(200); // Intervalo entre as leituras e envios. Ajustar conforme necessidade.
+  delay(200);
 }
